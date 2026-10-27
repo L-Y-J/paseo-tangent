@@ -2,6 +2,9 @@
   "id": "tangent",
   "name": "Tangent",
   "description": "Claude Code-style /btw, /subtask, /fork, and /branch, with native session forks where the provider supports it.",
+  "media": [
+    "assets/btw-panel.png"
+  ],
   "requirements": {
     "paseo": ">=0.13.0"
   }
