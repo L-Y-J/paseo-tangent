@@ -1,0 +1,262 @@
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import type { PaseoAgentHandle } from "@getpaseo/client";
+import type { PaseoApi } from "@getpaseo/client";
+import type { ForkMethod } from "../shared/rpc";
+import {
+  forkClaudeSession,
+  forkCodexThread,
+  forkOpenCodeSession,
+  forkPiSessionFile,
+  type ForkSource,
+} from "./native-forks";
+
+const execFileAsync = promisify(execFile);
+const LOG_PREFIX = "[tangent]";
+const TRANSCRIPT_ENTRY_LIMIT = 200;
+const PASEO_CLI_CANDIDATES = [
+  process.env.PASEO_CLI,
+  "/Applications/Paseo.app/Contents/Resources/bin/paseo",
+  "paseo",
+].filter((candidate): candidate is string => Boolean(candidate));
+
+type ParentSnapshot = NonNullable<Awaited<ReturnType<PaseoAgentHandle["refresh"]>>>["agent"];
+
+export interface CloneOptions {
+  title: string;
+  /** Starts the clone's first turn. Omit to leave a native fork idle. */
+  prompt?: string;
+  /** Tags the prompt so its reply can be found later with `replyTo`. */
+  messageId?: string;
+  labels?: Record<string, string>;
+  /**
+   * Create the clone as a child of the parent, which keeps it out of the tab bar, like a
+   * subtask that never reports back.
+   */
+  asChild?: boolean;
+  /** Claude tools the clone may not use. */
+  disallowedTools?: string[];
+}
+
+export interface CloneResult {
+  agent: PaseoAgentHandle;
+  method: ForkMethod;
+}
+
+export async function loadAgent(paseo: PaseoApi, agentId: string): Promise<ParentSnapshot> {
+  const result = await paseo.agents.ref(agentId).refresh();
+  if (!result) throw new Error(`Agent ${agentId} not found`);
+  return result.agent;
+}
+
+export function providerConfig(agent: ParentSnapshot) {
+  return {
+    provider: agent.model ? `${agent.provider}/${agent.model}` : agent.provider,
+    modeId: agent.currentModeId ?? undefined,
+    thinkingOptionId: agent.thinkingOptionId ?? undefined,
+  };
+}
+
+// Providers that can fork a session on disk get a true fork, imported as a new agent, so
+// the clone keeps tool results and the prompt cache. Anything else, or any failure along the
+// way, falls back to pasting the visible conversation into a fresh agent.
+const NATIVE_FORKS: Record<string, (source: ForkSource) => Promise<string>> = {
+  claude: forkClaudeSession,
+  codex: forkCodexThread,
+  opencode: forkOpenCodeSession,
+  pi: forkPiSessionFile,
+  omp: forkPiSessionFile,
+};
+
+export async function cloneAgent(
+  paseo: PaseoApi,
+  parentId: string,
+  options: CloneOptions,
+): Promise<CloneResult> {
+  const parent = await loadAgent(paseo, parentId);
+  const fork = NATIVE_FORKS[parent.provider];
+  // Only Claude can resume a forked session in a newly created child agent.
+  if (fork && (!options.asChild || parent.provider === "claude")) {
+    try {
+      const agent = await nativeFork(paseo, parent, fork, options);
+      return { agent, method: "native" };
+    } catch (error) {
+      console.warn(`${LOG_PREFIX} native ${parent.provider} fork failed, using transcript: ${String(error)}`);
+    }
+  }
+  const agent = await transcriptFork(paseo, parent, options);
+  return { agent, method: "transcript" };
+}
+
+async function nativeFork(
+  paseo: PaseoApi,
+  parent: ParentSnapshot,
+  fork: (source: ForkSource) => Promise<string>,
+  options: CloneOptions,
+): Promise<PaseoAgentHandle> {
+  const sessionId = parent.runtimeInfo?.sessionId ?? parent.persistence?.sessionId;
+  if (!sessionId) throw new Error(`parent has no ${parent.provider} session yet`);
+  const forkId = await fork({
+    sessionId,
+    nativeHandle: parent.persistence?.nativeHandle ?? null,
+    cwd: parent.cwd,
+    model: parent.model,
+  });
+
+  // Import gives a root agent whose tab shows the copied history. A child has to be created
+  // instead, so it resumes the copied session through a CLI flag.
+  if (options.asChild) {
+    return paseo.agents.create({
+      cwd: parent.cwd,
+      parent: parent.id,
+      config: {
+        ...providerConfig(parent),
+        options: {
+          extraArgs: { resume: forkId },
+          ...(options.disallowedTools ? { disallowedTools: options.disallowedTools } : {}),
+        },
+      },
+      title: options.title,
+      labels: options.labels,
+      prompt: options.prompt,
+      clientMessageId: options.messageId,
+    });
+  }
+
+  const agentId = await importSession(parent.provider, forkId, parent.cwd, options.labels);
+  await inheritSettings(agentId, parent, options.title);
+  const agent = paseo.agents.ref(agentId);
+  if (options.prompt) await agent.send(options.prompt, { messageId: options.messageId });
+  return agent;
+}
+
+// The plugin SDK cannot import sessions or change thinking and mode, so these go through
+// the CLI, which can.
+export async function runPaseoCli(args: string[]): Promise<string> {
+  let lastError: unknown;
+  for (const cli of PASEO_CLI_CANDIDATES) {
+    try {
+      const { stdout } = await execFileAsync(cli, args, { timeout: 60_000 });
+      return stdout;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError;
+}
+
+async function importSession(
+  provider: string,
+  sessionId: string,
+  cwd: string,
+  labels: Record<string, string> = {},
+): Promise<string> {
+  const args = ["import", sessionId, "--provider", provider, "--cwd", cwd, "--json"];
+  for (const [key, value] of Object.entries(labels)) args.push("--label", `${key}=${value}`);
+  const stdout = await runPaseoCli(args);
+  const agentId = parseImportedAgentId(stdout);
+  if (!agentId) throw new Error(`no agent id in import output: ${stdout.slice(0, 200)}`);
+  return agentId;
+}
+
+// An imported session starts with Paseo's defaults. Failures here leave a usable fork with
+// default settings, so they are logged rather than thrown.
+async function inheritSettings(agentId: string, parent: ParentSnapshot, title: string) {
+  // The CLI rejects --thinking combined with --name, so they are separate updates.
+  const steps = [["agent", "update", agentId, "--name", title]];
+  if (parent.thinkingOptionId) steps.push(["agent", "update", agentId, "--thinking", parent.thinkingOptionId]);
+  if (parent.currentModeId) steps.push(["agent", "mode", agentId, parent.currentModeId]);
+  for (const args of steps) {
+    try {
+      await runPaseoCli([...args, "--json"]);
+    } catch (error) {
+      console.warn(`${LOG_PREFIX} ${args.slice(0, 2).join(" ")} failed for fork ${agentId}: ${String(error)}`);
+    }
+  }
+}
+
+function parseImportedAgentId(stdout: string): string | null {
+  const start = stdout.indexOf("{");
+  if (start < 0) return null;
+  const parsed = JSON.parse(stdout.slice(start));
+  return parsed.agentId ?? parsed.id ?? parsed.agent?.id ?? null;
+}
+
+async function transcriptFork(
+  paseo: PaseoApi,
+  parent: ParentSnapshot,
+  options: CloneOptions,
+): Promise<PaseoAgentHandle> {
+  const page = await paseo.agents.ref(parent.id).timeline.refetch({
+    direction: "tail",
+    limit: TRANSCRIPT_ENTRY_LIMIT,
+    projection: "canonical",
+  });
+  const lines = [`Conversation so far with "${parent.title ?? parent.id}" (cloned):`];
+  for (const { item } of page.entries) {
+    if (item.type === "user_message") lines.push(`User: ${item.text}`);
+    else if (item.type === "assistant_message") lines.push(`Assistant: ${item.text}`);
+  }
+
+  return paseo.agents.create({
+    cwd: parent.cwd,
+    ...(options.asChild ? { parent: parent.id } : {}),
+    config: providerConfig(parent),
+    title: options.title,
+    labels: options.labels,
+    clientMessageId: options.messageId,
+    prompt:
+      options.prompt ??
+      "The attached transcript is our conversation so far. Reply with a one-line acknowledgement and wait for my next message.",
+    attachments: [
+      {
+        type: "text",
+        mimeType: "text/plain",
+        title: `Transcript of ${parent.title ?? parent.id}`,
+        text: lines.join("\n\n"),
+      },
+    ],
+  });
+}
+
+export async function lastAssistantMessage(paseo: PaseoApi, agentId: string): Promise<string | null> {
+  const page = await paseo.agents.ref(agentId).timeline.refetch({
+    direction: "tail",
+    limit: 50,
+    projection: "canonical",
+  });
+  for (let i = page.entries.length - 1; i >= 0; i--) {
+    const { item } = page.entries[i];
+    if (item.type === "assistant_message" && item.text.trim()) return item.text;
+  }
+  return null;
+}
+
+export interface Reply {
+  /** The last assistant text answering the message, or null if it produced none. */
+  text: string | null;
+  /** A later user message followed, so the turn answering this one is over. */
+  superseded: boolean;
+}
+
+// Finds the reply to one tagged user message, ignoring turns the user started afterwards
+// in the agent's own tab. Null when the message is not in the timeline yet.
+export async function replyTo(paseo: PaseoApi, agentId: string, messageId: string): Promise<Reply | null> {
+  const page = await paseo.agents.ref(agentId).timeline.refetch({
+    direction: "tail",
+    limit: 200,
+    projection: "canonical",
+  });
+  const start = page.entries.findIndex(
+    ({ item }) =>
+      item.type === "user_message" && (item.messageId === messageId || item.clientMessageId === messageId),
+  );
+  if (start < 0) return null;
+
+  let text: string | null = null;
+  for (const { item } of page.entries.slice(start + 1)) {
+    if (item.type === "user_message") return { text, superseded: true };
+    if (item.type === "assistant_message" && item.text.trim()) text = item.text;
+  }
+  return { text, superseded: false };
+}

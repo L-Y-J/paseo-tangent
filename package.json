@@ -1,0 +1,35 @@
+{
+  "name": "paseo-plugin-tangent",
+  "version": "0.1.0",
+  "description": "Claude Code-style /btw, /subtask, /fork, and /branch for Paseo agents.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nilbus/paseo-tangent.git"
+  },
+  "type": "module",
+  "files": [
+    "paseo-plugin.json",
+    "OVERVIEW.md",
+    "README.md",
+    "index.client.tsx",
+    "index.server.ts",
+    "client/",
+    "server/",
+    "shared/"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@getpaseo/client": "0.13.2",
+    "@getpaseo/plugin": "0.13.2",
+    "@getpaseo/protocol": "0.13.2",
+    "@types/node": "^24.0.0",
+    "@types/react": "~19.2.0",
+    "react": "19.1.0",
+    "react-native": "0.81.5",
+    "typescript": "^5.9.3",
+    "zod": "^4.4.3"
+  }
+}
