@@ -1,0 +1,21 @@
+client/store.ts
+  s_02bab5d52eee0e::t_5f1dddf2a348e0 70-71,81
+client/fork-panel.tsx
+  s_02bab5d52eee0e::t_0ed61e7c781116 21-24
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "3a4ca32e114fcb0c1dceae0bfd7452f79dd4423d",
+  "prompts": {},
+  "sessions": {
+    "s_02bab5d52eee0e": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "01a18213-d086-712c-9fed-5104e1d731aa",
+        "model": "deepseek-flash"
+      },
+      "human_author": "liyongjie.103 <liyongjie.103@jd.com>"
+    }
+  }
+}
