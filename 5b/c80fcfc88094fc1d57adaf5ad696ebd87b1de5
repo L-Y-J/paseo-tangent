@@ -1,0 +1,28 @@
+index.server.ts
+  s_02bab5d52eee0e::t_be0487aa304aef 71-73
+server/clone.ts
+  s_02bab5d52eee0e::t_af103484143bc0 218
+  s_02bab5d52eee0e::t_4910319a58b14a 206,217,223-228
+client/fork-panel.tsx
+  s_02bab5d52eee0e::t_a45c771be16ab1 2,7,17-18,32-34,41
+shared/rpc.ts
+  s_02bab5d52eee0e::t_3e36026ae46bd4 32-33,40-41
+client/store.ts
+  s_02bab5d52eee0e::t_7b6b659cfe3f50 71,78
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "5bc80fcfc88094fc1d57adaf5ad696ebd87b1de5",
+  "prompts": {},
+  "sessions": {
+    "s_02bab5d52eee0e": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "01a18213-d086-712c-9fed-5104e1d731aa",
+        "model": "deepseek-flash"
+      },
+      "human_author": "liyongjie.103 <liyongjie.103@jd.com>"
+    }
+  }
+}
