@@ -203,8 +203,7 @@ async function transcriptFork(
   }
   if (options.anchorMessageId) lines.push("(The conversation was copied up to this point and continues from here.)");
 
-  return paseo.agents.create({
-    cwd: parent.cwd,
+  const shared = {
     ...(options.asChild ? { parent: parent.id } : {}),
     config: providerConfig(parent),
     title: options.title,
@@ -215,13 +214,18 @@ async function transcriptFork(
       "The attached transcript is our conversation so far. Reply with a one-line acknowledgement and wait for my next message.",
     attachments: [
       {
-        type: "text",
-        mimeType: "text/plain",
+        type: "text" as const,
+        mimeType: "text/plain" as const,
         title: `Transcript of ${parent.title ?? parent.id}`,
         text: lines.join("\n\n"),
       },
     ],
-  });
+  };
+  // Creating by cwd alone lands the clone in a new workspace. A tab belongs to the parent's
+  // workspace, so ask that workspace for the agent when the parent names one.
+  return !options.asChild && parent.workspaceId
+    ? paseo.workspaces.ref(parent.workspaceId).agents.create(shared)
+    : paseo.agents.create({ cwd: parent.cwd, ...shared });
 }
 
 type TimelineEntries = Awaited<ReturnType<ReturnType<PaseoApi["agents"]["ref"]>["timeline"]["refetch"]>>["entries"];

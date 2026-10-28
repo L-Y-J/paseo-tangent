@@ -29,15 +29,16 @@ export const forkAnchorsRpc = defineRpc({
   output: z.object({ anchors: z.array(forkAnchorSchema) }),
 });
 
-// Fork the conversation up to one message instead of cloning all of it.
+// Fork the conversation up to one message instead of cloning all of it. No prompt is sent:
+// like Paseo's own Fork, the new tab waits for the user's next message.
 export const forkAtRpc = defineRpc({
   name: "tangent.fork-at",
   input: z.object({
     agentId: z.string(),
     /** `messageId` or `clientMessageId` of the user message to cut after. */
     anchorId: z.string(),
-    prompt: z.string(),
-    reportBack: z.boolean(),
+    /** Shown in the new tab's title; the message the fork starts after. */
+    preview: z.string(),
   }),
   output: z.object({ agentId: z.string(), method: forkMethodSchema, opened: z.boolean() }),
 });

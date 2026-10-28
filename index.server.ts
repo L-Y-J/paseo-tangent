@@ -68,19 +68,13 @@ export default function contribute(server: PluginServerContext) {
     anchors: await listForkAnchors(paseo, agentId),
   }));
 
-  // Same result as /fork, but the copy ends at the picked message instead of the tail.
-  server.handle(forkAtRpc, async ({ agentId, anchorId, prompt, reportBack }, { paseo }) => {
-    const title = prompt.trim() ? `Fork at: ${shortTitle(prompt)}` : "Fork at picked message";
-    const messageId = randomUUID();
+  // Same result as /fork, but the copy ends at the picked message and the tab stays idle.
+  server.handle(forkAtRpc, async ({ agentId, anchorId, preview }, { paseo }) => {
+    const title = preview.trim() ? `Fork at: ${shortTitle(preview)}` : "Fork at picked message";
     const { agent, method } = await cloneAgent(paseo, agentId, {
       title,
-      prompt: prompt.trim() || undefined,
-      messageId,
       anchorMessageId: anchorId,
     });
-    if (reportBack && prompt.trim()) {
-      pendingReports.set(agent.id, { parentId: agentId, kind: "fork", title, messageId });
-    }
     return { agentId: agent.id, method, opened: await openInDesktop(agent.id) };
   });
 
