@@ -15,6 +15,33 @@ export const forkRpc = defineRpc({
   output: z.object({ agentId: z.string(), method: forkMethodSchema, opened: z.boolean() }),
 });
 
+// One selectable point in the parent's history: a user message a fork can start after.
+export const forkAnchorSchema = z.object({
+  id: z.string(),
+  /** First line of the prompt, trimmed for a one-line list row. */
+  preview: z.string(),
+});
+export type ForkAnchor = z.infer<typeof forkAnchorSchema>;
+
+export const forkAnchorsRpc = defineRpc({
+  name: "tangent.fork-anchors",
+  input: z.object({ agentId: z.string() }),
+  output: z.object({ anchors: z.array(forkAnchorSchema) }),
+});
+
+// Fork the conversation up to one message instead of cloning all of it.
+export const forkAtRpc = defineRpc({
+  name: "tangent.fork-at",
+  input: z.object({
+    agentId: z.string(),
+    /** `messageId` or `clientMessageId` of the user message to cut after. */
+    anchorId: z.string(),
+    prompt: z.string(),
+    reportBack: z.boolean(),
+  }),
+  output: z.object({ agentId: z.string(), method: forkMethodSchema, opened: z.boolean() }),
+});
+
 export const subtaskRpc = defineRpc({
   name: "tangent.subtask",
   input: z.object({ agentId: z.string(), prompt: z.string() }),

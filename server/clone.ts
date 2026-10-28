@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { PaseoAgentHandle } from "@getpaseo/client";
 import type { PaseoApi } from "@getpaseo/client";
-import type { ForkMethod } from "../shared/rpc";
+import type { ForkAnchor, ForkMethod } from "../shared/rpc";
 import {
   forkClaudeSession,
   forkCodexThread,
@@ -36,6 +36,12 @@ export interface CloneOptions {
   asChild?: boolean;
   /** Claude tools the clone may not use. */
   disallowedTools?: string[];
+  /**
+   * Cut point in the parent's history: the `messageId`/`clientMessageId` of a user message
+   * to end the copied conversation after. A native fork copies the whole session file, so an
+   * anchored fork always goes through the transcript.
+   */
+  anchorMessageId?: string;
 }
 
 export interface CloneResult {
@@ -74,7 +80,7 @@ export async function cloneAgent(
   options: CloneOptions,
 ): Promise<CloneResult> {
   const parent = await loadAgent(paseo, parentId);
-  const fork = NATIVE_FORKS[parent.provider];
+  const fork = options.anchorMessageId ? undefined : NATIVE_FORKS[parent.provider];
   // Only Claude can resume a forked session in a newly created child agent.
   if (fork && (!options.asChild || parent.provider === "claude")) {
     try {
@@ -187,16 +193,15 @@ async function transcriptFork(
   parent: ParentSnapshot,
   options: CloneOptions,
 ): Promise<PaseoAgentHandle> {
-  const page = await paseo.agents.ref(parent.id).timeline.refetch({
-    direction: "tail",
-    limit: TRANSCRIPT_ENTRY_LIMIT,
-    projection: "canonical",
-  });
+  const entries = await fetchEntries(paseo, parent.id);
+  const end = options.anchorMessageId ? anchorIndex(entries, options.anchorMessageId) : entries.length - 1;
+  if (end < 0) throw new Error(`anchor ${options.anchorMessageId} is not in the copied history`);
   const lines = [`Conversation so far with "${parent.title ?? parent.id}" (cloned):`];
-  for (const { item } of page.entries) {
+  for (const { item } of entries.slice(0, end + 1)) {
     if (item.type === "user_message") lines.push(`User: ${item.text}`);
     else if (item.type === "assistant_message") lines.push(`Assistant: ${item.text}`);
   }
+  if (options.anchorMessageId) lines.push("(The conversation was copied up to this point and continues from here.)");
 
   return paseo.agents.create({
     cwd: parent.cwd,
@@ -217,6 +222,43 @@ async function transcriptFork(
       },
     ],
   });
+}
+
+type TimelineEntries = Awaited<ReturnType<ReturnType<PaseoApi["agents"]["ref"]>["timeline"]["refetch"]>>["entries"];
+
+function fetchEntries(paseo: PaseoApi, agentId: string) {
+  return paseo.agents.ref(agentId).timeline.refetch({
+    direction: "tail",
+    limit: TRANSCRIPT_ENTRY_LIMIT,
+    projection: "canonical",
+  }).then((page) => page.entries);
+}
+
+function entryAnchorId(item: TimelineEntries[number]["item"]): string | null {
+  return item.type === "user_message" ? item.messageId ?? item.clientMessageId ?? null : null;
+}
+
+function anchorIndex(entries: TimelineEntries, anchorId: string): number {
+  return entries.findIndex((entry) => entryAnchorId(entry.item) === anchorId);
+}
+
+// The points a user can fork from: prompts in the copied window that carry an id. Assistant
+// replies are left out: a fork cut after one of those is the same conversation.
+export async function listForkAnchors(paseo: PaseoApi, agentId: string): Promise<ForkAnchor[]> {
+  const entries = await fetchEntries(paseo, agentId);
+  const anchors: ForkAnchor[] = [];
+  for (const { item } of entries) {
+    if (item.type !== "user_message") continue;
+    const id = entryAnchorId(item);
+    if (!id) continue;
+    anchors.push({ id, preview: preview(item.text) });
+  }
+  return anchors;
+}
+
+function preview(text: string): string {
+  const line = text.trim().split("\n")[0] ?? "";
+  return line.length > 100 ? `${line.slice(0, 97)}...` : line;
 }
 
 export async function lastAssistantMessage(paseo: PaseoApi, agentId: string): Promise<string | null> {

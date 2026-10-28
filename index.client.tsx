@@ -1,9 +1,11 @@
 import type { PluginAgentCommandContext, PluginClientContext } from "@getpaseo/plugin/client";
 import { BtwPanel } from "./client/btw-panel";
+import { ForkPanel } from "./client/fork-panel";
 import { store } from "./client/store";
 import { forkRpc, subtaskRpc } from "./shared/rpc";
 
 const PANEL_ID = "btw";
+const FORK_PANEL_ID = "fork";
 const LOG_PREFIX = "[tangent]";
 
 type CommandContext = PluginAgentCommandContext & { args: string };
@@ -56,6 +58,23 @@ export default function contribute(client: PluginClientContext) {
         } catch (error) {
           console.error(`${LOG_PREFIX} subtask failed: ${String(error)}`);
         }
+      },
+    }),
+    client.addAgentPanel({
+      id: FORK_PANEL_ID,
+      title: "Fork",
+      icon: "GitFork",
+      locations: ["explorer"],
+      Component: ForkPanel,
+    }),
+    client.addSlashCommand({
+      name: "forkat",
+      description: "Fork this conversation from an earlier message",
+      argumentHint: "",
+      context: "agent",
+      onSubmit(context) {
+        store.loadAnchors(context.agent.id);
+        context.openPanel(FORK_PANEL_ID, { location: "explorer" });
       },
     }),
     client.addSlashCommand({

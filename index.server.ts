@@ -1,8 +1,8 @@
 import type { PluginServerContext } from "@getpaseo/plugin/server";
 import type { PaseoApi } from "@getpaseo/client";
-import { btwCloseRpc, btwRpc, forkRpc, subtaskRpc } from "./shared/rpc";
+import { btwCloseRpc, btwRpc, forkAnchorsRpc, forkAtRpc, forkRpc, subtaskRpc } from "./shared/rpc";
 import { randomUUID } from "node:crypto";
-import { cloneAgent, lastAssistantMessage, loadAgent, providerConfig, replyTo, runPaseoCli } from "./server/clone";
+import { cloneAgent, lastAssistantMessage, listForkAnchors, loadAgent, providerConfig, replyTo, runPaseoCli } from "./server/clone";
 
 const LOG_PREFIX = "[tangent]";
 const BTW_TIMEOUT_MS = 5 * 60_000;
@@ -57,6 +57,26 @@ export default function contribute(server: PluginServerContext) {
       title,
       prompt: prompt.trim() || undefined,
       messageId,
+    });
+    if (reportBack && prompt.trim()) {
+      pendingReports.set(agent.id, { parentId: agentId, kind: "fork", title, messageId });
+    }
+    return { agentId: agent.id, method, opened: await openInDesktop(agent.id) };
+  });
+
+  server.handle(forkAnchorsRpc, async ({ agentId }, { paseo }) => ({
+    anchors: await listForkAnchors(paseo, agentId),
+  }));
+
+  // Same result as /fork, but the copy ends at the picked message instead of the tail.
+  server.handle(forkAtRpc, async ({ agentId, anchorId, prompt, reportBack }, { paseo }) => {
+    const title = prompt.trim() ? `Fork at: ${shortTitle(prompt)}` : "Fork at picked message";
+    const messageId = randomUUID();
+    const { agent, method } = await cloneAgent(paseo, agentId, {
+      title,
+      prompt: prompt.trim() || undefined,
+      messageId,
+      anchorMessageId: anchorId,
     });
     if (reportBack && prompt.trim()) {
       pendingReports.set(agent.id, { parentId: agentId, kind: "fork", title, messageId });
