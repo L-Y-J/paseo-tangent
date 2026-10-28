@@ -18,8 +18,10 @@ export function ForkPanel({ params, navigation, theme }: PluginAgentPanelProps) 
 
   const fork = async (anchorId: string) => {
     const created = await store.forkAt(params.agentId, anchorId, draft.trim());
-    if (created && navigation) navigation.openAgent({ agentId: created });
-    if (created) setDraft("");
+    if (!created) return;
+    // The desktop opens the tab itself; other clients fall back to the panel's navigation.
+    if (!created.opened && navigation) navigation.openAgent({ agentId: created.agentId });
+    setDraft("");
   };
 
   return (

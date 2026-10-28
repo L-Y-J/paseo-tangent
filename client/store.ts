@@ -67,8 +67,8 @@ export const store = {
     emit();
   },
 
-  // Returns the new agent's id, or null when the fork failed.
-  async forkAt(agentId: string, anchorId: string, prompt: string): Promise<string | null> {
+  // Returns the fork's agent and whether the desktop already opened it, or null on failure.
+  async forkAt(agentId: string, anchorId: string, prompt: string): Promise<{ agentId: string; opened: boolean } | null> {
     if (!rpc) return null;
     const state = this.anchors(agentId);
     if (state.busyId) return null;
@@ -78,7 +78,7 @@ export const store = {
       const result = await rpc(forkAtRpc, { agentId, anchorId, prompt, reportBack: Boolean(prompt) });
       anchors.set(agentId, { ...this.anchors(agentId), busyId: null });
       emit();
-      return result.agentId as string;
+      return { agentId: result.agentId as string, opened: Boolean(result.opened) };
     } catch (error) {
       anchors.set(agentId, { ...this.anchors(agentId), busyId: null, error: String(error) });
       emit();
