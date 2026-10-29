@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { readFile, writeFile } from "node:fs/promises";
 import { promisify } from "node:util";
 import type { PaseoAgentHandle } from "@getpaseo/client";
 import type { PaseoApi } from "@getpaseo/client";
@@ -134,37 +135,67 @@ async function sessionFileFork(
     ? await forkPiSessionUntil(source, options.anchorText)
     : await forkPiSessionFile(source);
 
-  // Two ways to say "resume this session file". The SDK documents neither, so try both and
-  // keep the first that actually comes up with the copied history.
-  const shapes: { name: string; options: Record<string, unknown> }[] = [
-    { name: "session", options: { session: forkPath } },
-    { name: "extraArgs", options: { extraArgs: ["--session", forkPath] } },
-  ];
-  const failures: string[] = [];
-  for (const shape of shapes) {
-    let agent: PaseoAgentHandle | null = null;
-    try {
-      const shared = {
-        config: { ...providerConfig(parent), options: shape.options },
-        title: options.title,
-        labels: options.labels,
-      };
-      agent = parent.workspaceId
-        ? await paseo.workspaces.ref(parent.workspaceId).agents.create(shared)
-        : await paseo.agents.create({ cwd: parent.cwd, ...shared });
-      if (!(await hasHistory(paseo, agent.id))) {
-        failures.push(`${shape.name}: started without the copied history`);
-        await agent.archive().catch(() => undefined);
-        continue;
-      }
-      if (options.prompt) await agent.send(options.prompt, { messageId: options.messageId });
-      return agent;
-    } catch (error) {
-      failures.push(`${shape.name}: ${String(error).replace(/\s+/g, " ").slice(0, 200)}`);
-      if (agent) await agent.archive().catch(() => undefined);
-    }
+  // Paseo's Pi provider options are strict and carry no way to open an existing session file,
+  // so an agent cannot be created onto the copy. Create it empty in the parent's workspace
+  // (that is what makes it a tab), write the copy over its own session file, and restart the
+  // process so Pi loads it. Every step is checked; a miss archives the agent and falls back.
+  const shared = { config: providerConfig(parent), title: options.title, labels: options.labels };
+  const agent = parent.workspaceId
+    ? await paseo.workspaces.ref(parent.workspaceId).agents.create(shared)
+    : await paseo.agents.create({ cwd: parent.cwd, ...shared });
+  try {
+    const target = await waitForSessionFile(paseo, agent.id);
+    await writeForkedSession(forkPath, target);
+    await runPaseoCli(["agent", "reload", agent.id, "--json"]);
+    if (!(await hasHistory(paseo, agent.id))) throw new Error("reload did not restore the copied history");
+  } catch (error) {
+    await agent.archive().catch(() => undefined);
+    throw error;
   }
-  throw new Error(failures.join(" | "));
+  if (options.prompt) await agent.send(options.prompt, { messageId: options.messageId });
+  return agent;
+}
+
+// Pi writes the session file when the agent starts, and Paseo reports the path only once it
+// does, so give it a few seconds.
+async function waitForSessionFile(
+  paseo: PaseoApi,
+  agentId: string,
+): Promise<{ nativeHandle: string; sessionId: string }> {
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const refreshed = await paseo.agents.ref(agentId).refresh();
+    const agent = refreshed?.agent;
+    const persistence = agent?.persistence;
+    const sessionId = agent?.runtimeInfo?.sessionId ?? persistence?.sessionId;
+    if (persistence?.nativeHandle && sessionId) {
+      return { nativeHandle: persistence.nativeHandle, sessionId };
+    }
+    await new Promise((resolve) => setTimeout(resolve, 600));
+  }
+  throw new Error(`agent ${agentId} never reported a session file`);
+}
+
+// The copy carries its own session id; the agent only loads it under its own.
+async function writeForkedSession(
+  forkPath: string,
+  target: { nativeHandle: string; sessionId: string },
+): Promise<void> {
+  const lines = (await readFile(forkPath, "utf8")).split("\n");
+  let rewritten = false;
+  const out = lines.map((line) => {
+    if (rewritten || !line.includes('"session"')) return line;
+    try {
+      const entry = JSON.parse(line);
+      if (entry?.type !== "session") return line;
+      entry.id = target.sessionId;
+      rewritten = true;
+      return JSON.stringify(entry);
+    } catch {
+      return line;
+    }
+  });
+  if (!rewritten) throw new Error(`no session header in ${forkPath}`);
+  await writeFile(target.nativeHandle, out.join("\n"), "utf8");
 }
 
 async function hasHistory(paseo: PaseoApi, agentId: string): Promise<boolean> {
