@@ -134,27 +134,37 @@ async function sessionFileFork(
     ? await forkPiSessionUntil(source, options.anchorText)
     : await forkPiSessionFile(source);
 
-  const shared = {
-    config: {
-      ...providerConfig(parent),
-      // The Pi provider reads this as its session file and launches with `--session <path>`.
-      options: { session: forkPath },
-    },
-    title: options.title,
-    labels: options.labels,
-  };
-  const agent = parent.workspaceId
-    ? await paseo.workspaces.ref(parent.workspaceId).agents.create(shared)
-    : await paseo.agents.create({ cwd: parent.cwd, ...shared });
-
-  // Resuming the copy is the one unverified step here: a provider that ignores the session
-  // flag starts empty, and an empty tab is worse than the fallbacks, so drop it and retry.
-  if (!(await hasHistory(paseo, agent.id))) {
-    await agent.archive().catch(() => undefined);
-    throw new Error("the fork started without the copied history");
+  // Two ways to say "resume this session file". The SDK documents neither, so try both and
+  // keep the first that actually comes up with the copied history.
+  const shapes: { name: string; options: Record<string, unknown> }[] = [
+    { name: "session", options: { session: forkPath } },
+    { name: "extraArgs", options: { extraArgs: ["--session", forkPath] } },
+  ];
+  const failures: string[] = [];
+  for (const shape of shapes) {
+    let agent: PaseoAgentHandle | null = null;
+    try {
+      const shared = {
+        config: { ...providerConfig(parent), options: shape.options },
+        title: options.title,
+        labels: options.labels,
+      };
+      agent = parent.workspaceId
+        ? await paseo.workspaces.ref(parent.workspaceId).agents.create(shared)
+        : await paseo.agents.create({ cwd: parent.cwd, ...shared });
+      if (!(await hasHistory(paseo, agent.id))) {
+        failures.push(`${shape.name}: started without the copied history`);
+        await agent.archive().catch(() => undefined);
+        continue;
+      }
+      if (options.prompt) await agent.send(options.prompt, { messageId: options.messageId });
+      return agent;
+    } catch (error) {
+      failures.push(`${shape.name}: ${String(error).replace(/\s+/g, " ").slice(0, 200)}`);
+      if (agent) await agent.archive().catch(() => undefined);
+    }
   }
-  if (options.prompt) await agent.send(options.prompt, { messageId: options.messageId });
-  return agent;
+  throw new Error(failures.join(" | "));
 }
 
 async function hasHistory(paseo: PaseoApi, agentId: string): Promise<boolean> {
