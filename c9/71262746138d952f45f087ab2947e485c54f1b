@@ -1,0 +1,24 @@
+server/clone.ts
+  s_9b9b33585e747b::t_fbf6e296f60835 65
+  s_9b9b33585e747b::t_8358f0c1659c45 243-249,257-267,273,276-280,284-309
+  s_9b9b33585e747b::t_b4d41ab90fc629 4
+  s_9b9b33585e747b::t_dc666bbc609563 268-272,274-275
+  s_9b9b33585e747b::t_3cda81e2a39897 281-283
+  s_9b9b33585e747b::t_b141a532390da0 310
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "c971262746138d952f45f087ab2947e485c54f1b",
+  "prompts": {},
+  "sessions": {
+    "s_9b9b33585e747b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f8d38744-bedb-4578-97c3-bbdda4ff62fb",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "liyongjie.103 <liyongjie.103@jd.com>"
+    }
+  }
+}
