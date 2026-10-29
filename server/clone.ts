@@ -256,9 +256,15 @@ async function nativeFork(
 
 // A root Claude fork resumes the copied session through the CLI's --resume flag, on an agent
 // created inside the parent's workspace — that placement is what makes the fork a tab there.
-// The agent starts without a session id, so the mode command runs first to start the process
-// and report one; a reload then replays the fork's history into the new tab's timeline. Every
-// step is checked; a miss archives the agent and falls back to a transcript fork.
+// An idle agent has no Claude process and no session id; setting the mode does not start one
+// reliably either, but a message does. So the fork starts with the prompt itself (or a
+// one-line acknowledgement when there is none), which launches Claude with --resume; once the
+// resumed session id shows up, a reload replays the fork's history into the new tab's timeline.
+// Every step is checked; a miss archives the agent and falls back to a transcript fork.
+const BRANCH_ACK_PROMPT =
+  "[This tab was forked from the conversation above. Reply with a one-line acknowledgement " +
+  "and wait for my next message.]";
+
 async function claudeRootFork(
   paseo: PaseoApi,
   parent: ParentSnapshot,
@@ -278,9 +284,9 @@ async function claudeRootFork(
     if (parent.thinkingOptionId) {
       await runPaseoCli(["agent", "update", agent.id, "--thinking", parent.thinkingOptionId, "--json"]);
     }
-    // Setting the mode starts the Claude process (an idle agent has none yet), which is what
-    // makes it report the resumed session id.
-    await runPaseoCli(["agent", "mode", agent.id, parent.currentModeId ?? "default", "--json"]);
+    // The message is what starts Claude (with --resume) on an idle agent; it is sent before the
+    // reload, so the turn's reply lands after the restored history either way.
+    await agent.send(options.prompt ?? BRANCH_ACK_PROMPT, { messageId: options.messageId });
     const resumed = await waitForSessionId(paseo, agent.id);
     if (resumed !== forkId) {
       throw new Error(`agent resumed session ${resumed ?? "(none)"} instead of the fork ${forkId}`);
@@ -291,14 +297,13 @@ async function claudeRootFork(
     await agent.archive().catch(() => undefined);
     throw error;
   }
-  if (options.prompt) await agent.send(options.prompt, { messageId: options.messageId });
   return agent;
 }
 
 // Claude reports its session id once the process starts and the init message arrives; the
-// running mode is what starts it, so this waits for the id that resume picked up.
+// message that starts it is what resume picks up, so this waits for that id.
 async function waitForSessionId(paseo: PaseoApi, agentId: string): Promise<string | null> {
-  for (let attempt = 0; attempt < 15; attempt++) {
+  for (let attempt = 0; attempt < 25; attempt++) {
     const refreshed = await paseo.agents.ref(agentId).refresh();
     const agent = refreshed?.agent;
     const sessionId = agent?.runtimeInfo?.sessionId ?? agent?.persistence?.sessionId ?? null;
