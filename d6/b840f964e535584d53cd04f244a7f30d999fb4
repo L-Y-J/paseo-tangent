@@ -1,0 +1,21 @@
+server/clone.ts
+  s_02bab5d52eee0e::t_d9aa8483f65f61 138-139
+  s_02bab5d52eee0e::t_f683f3924fc7a0 85,93-101
+  s_02bab5d52eee0e::t_aa43a6034c823b 115-137,140-165
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "d6b840f964e535584d53cd04f244a7f30d999fb4",
+  "prompts": {},
+  "sessions": {
+    "s_02bab5d52eee0e": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "01a18213-d086-712c-9fed-5104e1d731aa",
+        "model": "deepseek-flash"
+      },
+      "human_author": "liyongjie.103 <liyongjie.103@jd.com>"
+    }
+  }
+}
