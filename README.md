@@ -19,7 +19,8 @@ Requires Paseo 0.13 or later.
 |---|---|---|
 | `/btw <question>` | Asks a side question in the "By the way" sidebar panel. The thread starts from a copy of the conversation, is told not to use tools, and the main agent never sees it. Follow-ups continue the same thread; **New thread** archives it. Answers time out after 5 minutes. | No |
 | `/subtask <task>` | Starts a background child agent with fresh context, on the parent's provider, model, mode, and thinking level. | Yes, once, when its first turn ends, as `<subtask-result>` |
-| `/fork <prompt>` | Copies the conversation into a new agent, opens it in a new tab, and sends it the prompt. | Yes, once, when it answers the prompt, as `<fork-result>` |
+| `/fork <prompt>` | Copies the conversation into a new agent, opens it in a new tab, and sends it the prompt. The tab opens in the parent's workspace. | Yes, once, when it answers the prompt, as `<fork-result>` |
+| `/forkat` | Opens a panel listing the prompts in the last 200 entries. Picking one forks the conversation up to that message: the tab keeps the history, opens in the parent's workspace, and waits for your first message instead of starting one. | No |
 | `/branch [prompt]` | Like `/fork`, but never reports back. With no prompt, the branch waits for you. | No |
 
 Reports are sent with `activeTurnBehavior: "steer"`, so a busy parent is steered, not interrupted. Only the reply to the plugin's own prompt is reported; turns you start in the child's tab are not.
