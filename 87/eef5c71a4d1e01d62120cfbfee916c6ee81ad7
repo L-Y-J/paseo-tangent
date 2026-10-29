@@ -1,0 +1,19 @@
+server/clone.ts
+  s_54e5adb0141e8d::t_4af5973acea957 287-291,301-303
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "87eef5c71a4d1e01d62120cfbfee916c6ee81ad7",
+  "prompts": {},
+  "sessions": {
+    "s_54e5adb0141e8d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5be3ae3e-ba97-4ab7-9015-c9e525a844fe",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "liyongjie.103 <liyongjie.103@jd.com>"
+    }
+  }
+}
