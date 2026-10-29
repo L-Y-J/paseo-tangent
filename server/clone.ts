@@ -82,7 +82,7 @@ const NATIVE_FORKS: Record<string, (source: ForkSource) => Promise<string>> = {
 
 // Providers whose session file can be cut at a prompt, giving an anchored fork the same
 // fidelity as a plain one: tool results, file reads and the prompt cache all survive.
-const CUTTABLE_SESSION_PROVIDERS = new Set(["pi", "omp"]);
+const SESSION_FILE_PROVIDERS = new Set(["pi", "omp"]);
 
 export async function cloneAgent(
   paseo: PaseoApi,
@@ -90,11 +90,13 @@ export async function cloneAgent(
   options: CloneOptions,
 ): Promise<CloneResult> {
   const parent = await loadAgent(paseo, parentId);
-  if (options.anchorText && CUTTABLE_SESSION_PROVIDERS.has(parent.provider)) {
+  // A session file can be cut, so the fork stays native whether or not a prompt was picked;
+  // creating it inside the parent's workspace keeps it a tab instead of a new workspace.
+  if (!options.asChild && SESSION_FILE_PROVIDERS.has(parent.provider)) {
     try {
-      return { agent: await anchoredSessionFork(paseo, parent, options), method: "native" };
+      return { agent: await sessionFileFork(paseo, parent, options), method: "native" };
     } catch (error) {
-      console.warn(`${LOG_PREFIX} native ${parent.provider} fork at the picked message failed, using transcript: ${String(error)}`);
+      console.warn(`${LOG_PREFIX} native ${parent.provider} fork failed, using the previous path: ${String(error)}`);
     }
   }
   // A native fork copies the session file whole, so an anchored fork cannot use it.
@@ -112,25 +114,25 @@ export async function cloneAgent(
   return { agent, method: "transcript" };
 }
 
-// Pi keeps the session in one JSONL file, so a fork that stops at a picked prompt is still a
-// real fork: copy the file through that turn and start the agent inside the parent's
-// workspace, resuming the copy. Creating by cwd alone would open a new workspace, not a tab.
-async function anchoredSessionFork(
+// Pi keeps the session in one JSONL file, so a fork is a copy of that file: cut at the picked
+// prompt when there is one. Starting the agent inside the parent's workspace is what makes it
+// a tab; creating by cwd alone, or importing, opens a new workspace instead.
+async function sessionFileFork(
   paseo: PaseoApi,
   parent: ParentSnapshot,
   options: CloneOptions,
 ): Promise<PaseoAgentHandle> {
   const sessionId = parent.runtimeInfo?.sessionId ?? parent.persistence?.sessionId;
   if (!sessionId) throw new Error(`parent has no ${parent.provider} session yet`);
-  const forkPath = await forkPiSessionUntil(
-    {
-      sessionId,
-      nativeHandle: parent.persistence?.nativeHandle ?? null,
-      cwd: parent.cwd,
-      model: parent.model,
-    },
-    options.anchorText ?? "",
-  );
+  const source: ForkSource = {
+    sessionId,
+    nativeHandle: parent.persistence?.nativeHandle ?? null,
+    cwd: parent.cwd,
+    model: parent.model,
+  };
+  const forkPath = options.anchorText
+    ? await forkPiSessionUntil(source, options.anchorText)
+    : await forkPiSessionFile(source);
 
   const shared = {
     config: {
@@ -146,11 +148,12 @@ async function anchoredSessionFork(
     : await paseo.agents.create({ cwd: parent.cwd, ...shared });
 
   // Resuming the copy is the one unverified step here: a provider that ignores the session
-  // flag starts empty, and an empty tab is worse than the transcript fallback, so drop it.
+  // flag starts empty, and an empty tab is worse than the fallbacks, so drop it and retry.
   if (!(await hasHistory(paseo, agent.id))) {
     await agent.archive().catch(() => undefined);
     throw new Error("the fork started without the copied history");
   }
+  if (options.prompt) await agent.send(options.prompt, { messageId: options.messageId });
   return agent;
 }
 
