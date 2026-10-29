@@ -30,7 +30,7 @@ export function ForkPanel({ params, navigation, theme }: PluginAgentPanelProps) 
         </Pressable>
       </View>
       <Text style={[muted, { fontSize: 11 }]}>
-        The conversation is copied up to the message you pick; the new tab waits for your next message.
+        The session is forked up to the message you pick: the new tab keeps the history and waits for your next message.
       </Text>
       {state.status === "error" ? <Text style={{ color: colors.statusDanger }}>{state.error}</Text> : null}
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ gap: 6 }}>

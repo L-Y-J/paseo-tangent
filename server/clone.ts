@@ -8,6 +8,7 @@ import {
   forkCodexThread,
   forkOpenCodeSession,
   forkPiSessionFile,
+  forkPiSessionUntil,
   type ForkSource,
 } from "./native-forks";
 
@@ -42,6 +43,11 @@ export interface CloneOptions {
    * anchored fork always goes through the transcript.
    */
   anchorMessageId?: string;
+  /**
+   * The prompt at the cut point. Providers that can truncate a session file use it to keep
+   * the fork native; the rest fall back to the transcript.
+   */
+  anchorText?: string;
 }
 
 export interface CloneResult {
@@ -74,13 +80,25 @@ const NATIVE_FORKS: Record<string, (source: ForkSource) => Promise<string>> = {
   omp: forkPiSessionFile,
 };
 
+// Providers whose session file can be cut at a prompt, giving an anchored fork the same
+// fidelity as a plain one: tool results, file reads and the prompt cache all survive.
+const TRUNCATING_FORKS: Record<string, (source: ForkSource, stopPrefix: string) => Promise<string>> = {
+  pi: forkPiSessionUntil,
+  omp: forkPiSessionUntil,
+};
+
 export async function cloneAgent(
   paseo: PaseoApi,
   parentId: string,
   options: CloneOptions,
 ): Promise<CloneResult> {
   const parent = await loadAgent(paseo, parentId);
-  const fork = options.anchorMessageId ? undefined : NATIVE_FORKS[parent.provider];
+  const truncate = options.anchorText ? TRUNCATING_FORKS[parent.provider] : undefined;
+  const fork = truncate
+    ? (source: ForkSource) => truncate(source, options.anchorText ?? "")
+    : options.anchorMessageId
+      ? undefined
+      : NATIVE_FORKS[parent.provider];
   // Only Claude can resume a forked session in a newly created child agent.
   if (fork && (!options.asChild || parent.provider === "claude")) {
     try {

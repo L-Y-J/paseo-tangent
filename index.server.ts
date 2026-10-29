@@ -74,6 +74,7 @@ export default function contribute(server: PluginServerContext) {
     const { agent, method } = await cloneAgent(paseo, agentId, {
       title,
       anchorMessageId: anchorId,
+      anchorText: preview,
     });
     return { agentId: agent.id, method, opened: await openInDesktop(agent.id) };
   });
