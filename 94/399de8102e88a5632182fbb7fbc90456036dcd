@@ -1,0 +1,19 @@
+server/clone.ts
+  s_9b9b33585e747b::t_c9dd312ca737a9 259-267,287-289,304,306
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "94399de8102e88a5632182fbb7fbc90456036dcd",
+  "prompts": {},
+  "sessions": {
+    "s_9b9b33585e747b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f8d38744-bedb-4578-97c3-bbdda4ff62fb",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "liyongjie.103 <liyongjie.103@jd.com>"
+    }
+  }
+}
