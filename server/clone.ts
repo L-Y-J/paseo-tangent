@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { readFile, writeFile } from "node:fs/promises";
 import { promisify } from "node:util";
-import type { PaseoAgentHandle } from "@getpaseo/client";
+import type { PaseoAgentConfig, PaseoAgentHandle } from "@getpaseo/client";
 import type { PaseoApi } from "@getpaseo/client";
 import type { ForkAnchor, ForkMethod } from "../shared/rpc";
 import {
@@ -62,7 +62,7 @@ export async function loadAgent(paseo: PaseoApi, agentId: string): Promise<Paren
   return result.agent;
 }
 
-export function providerConfig(agent: ParentSnapshot) {
+export function providerConfig(agent: ParentSnapshot): PaseoAgentConfig {
   return {
     provider: agent.model ? `${agent.provider}/${agent.model}` : agent.provider,
     modeId: agent.currentModeId ?? undefined,
@@ -222,8 +222,6 @@ async function nativeFork(
     model: parent.model,
   });
 
-  // Import gives a root agent whose tab shows the copied history. A child has to be created
-  // instead, so it resumes the copied session through a CLI flag.
   if (options.asChild) {
     return paseo.agents.create({
       cwd: parent.cwd,
@@ -242,11 +240,72 @@ async function nativeFork(
     });
   }
 
+  // Import has no way to pick a workspace, so a cwd with several lands the fork in the
+  // oldest one instead of the parent's. Only Claude can resume a forked session inside a
+  // newly created agent, so the others keep the import and its workspace limitation.
+  if (parent.provider === "claude") {
+    return claudeRootFork(paseo, parent, forkId, options);
+  }
+
   const agentId = await importSession(parent.provider, forkId, parent.cwd, options.labels);
   await inheritSettings(agentId, parent, options.title);
   const agent = paseo.agents.ref(agentId);
   if (options.prompt) await agent.send(options.prompt, { messageId: options.messageId });
   return agent;
+}
+
+// A root Claude fork resumes the copied session through the CLI's --resume flag, on an agent
+// created inside the parent's workspace — that placement is what makes the fork a tab there.
+// The agent starts without a session id, so the mode command runs first to start the process
+// and report one; a reload then replays the fork's history into the new tab's timeline. Every
+// step is checked; a miss archives the agent and falls back to a transcript fork.
+async function claudeRootFork(
+  paseo: PaseoApi,
+  parent: ParentSnapshot,
+  forkId: string,
+  options: CloneOptions,
+): Promise<PaseoAgentHandle> {
+  const shared = { title: options.title, labels: options.labels };
+  const config: PaseoAgentConfig = {
+    ...providerConfig(parent),
+    options: { extraArgs: { resume: forkId } },
+  };
+  const create = parent.workspaceId
+    ? paseo.workspaces.ref(parent.workspaceId).agents.create({ ...shared, config })
+    : paseo.agents.create({ cwd: parent.cwd, ...shared, config });
+  const agent = await create;
+  try {
+    if (parent.thinkingOptionId) {
+      await runPaseoCli(["agent", "update", agent.id, "--thinking", parent.thinkingOptionId, "--json"]);
+    }
+    // Setting the mode starts the Claude process (an idle agent has none yet), which is what
+    // makes it report the resumed session id.
+    await runPaseoCli(["agent", "mode", agent.id, parent.currentModeId ?? "default", "--json"]);
+    const resumed = await waitForSessionId(paseo, agent.id);
+    if (resumed !== forkId) {
+      throw new Error(`agent resumed session ${resumed ?? "(none)"} instead of the fork ${forkId}`);
+    }
+    await runPaseoCli(["agent", "reload", agent.id, "--json"]);
+    if (!(await hasHistory(paseo, agent.id))) throw new Error("reload did not restore the copied history");
+  } catch (error) {
+    await agent.archive().catch(() => undefined);
+    throw error;
+  }
+  if (options.prompt) await agent.send(options.prompt, { messageId: options.messageId });
+  return agent;
+}
+
+// Claude reports its session id once the process starts and the init message arrives; the
+// running mode is what starts it, so this waits for the id that resume picked up.
+async function waitForSessionId(paseo: PaseoApi, agentId: string): Promise<string | null> {
+  for (let attempt = 0; attempt < 15; attempt++) {
+    const refreshed = await paseo.agents.ref(agentId).refresh();
+    const agent = refreshed?.agent;
+    const sessionId = agent?.runtimeInfo?.sessionId ?? agent?.persistence?.sessionId ?? null;
+    if (sessionId) return sessionId;
+    await new Promise((resolve) => setTimeout(resolve, 600));
+  }
+  return null;
 }
 
 // The plugin SDK cannot import sessions or change thinking and mode, so these go through
