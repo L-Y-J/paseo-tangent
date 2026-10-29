@@ -1,0 +1,25 @@
+server/native-forks.ts
+  s_02bab5d52eee0e::t_7096aa768cb72a 96-166
+server/clone.ts
+  s_02bab5d52eee0e::t_7d3ca9eba3f131 11,46-50,83-89,96-101
+client/fork-panel.tsx
+  s_02bab5d52eee0e::t_ed974931352e36 33
+index.server.ts
+  s_02bab5d52eee0e::t_6958de90c73418 77
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "8f10a22bbcbca4b51c301b2e965176d9d3f52fe4",
+  "prompts": {},
+  "sessions": {
+    "s_02bab5d52eee0e": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "01a18213-d086-712c-9fed-5104e1d731aa",
+        "model": "deepseek-flash"
+      },
+      "human_author": "liyongjie.103 <liyongjie.103@jd.com>"
+    }
+  }
+}
