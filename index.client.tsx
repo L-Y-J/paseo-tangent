@@ -68,21 +68,16 @@ export default function contribute(client: PluginClientContext) {
       Component: ForkPanel,
     }),
     client.addSlashCommand({
-      name: "forkat",
-      description: "Fork this conversation from an earlier message",
-      argumentHint: "",
+      name: "fork",
+      description: "Fork this conversation into a new tab; with no prompt, pick the message first",
+      argumentHint: "[prompt]",
       context: "agent",
       onSubmit(context) {
+        // Without a prompt the cut point is the point: let the panel show the history first.
+        if (context.args.trim()) return fork(context, true);
         store.loadAnchors(context.agent.id);
         context.openPanel(FORK_PANEL_ID, { location: "explorer" });
       },
-    }),
-    client.addSlashCommand({
-      name: "fork",
-      description: "Fork this conversation into a new tab; it reports back when done",
-      argumentHint: "<prompt>",
-      context: "agent",
-      onSubmit: (context) => fork(context, true),
     }),
     client.addSlashCommand({
       name: "branch",
