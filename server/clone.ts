@@ -284,10 +284,11 @@ async function claudeRootFork(
     if (parent.thinkingOptionId) {
       await runPaseoCli(["agent", "update", agent.id, "--thinking", parent.thinkingOptionId, "--json"]);
     }
-    // The message is what starts Claude (with --resume) on an idle agent. The turn it starts
-    // must finish before the reload: a reload kills the process, and a queued or running turn
-    // is lost with it (the prompt would vanish from the new tab).
-    await agent.send(options.prompt ?? BRANCH_ACK_PROMPT, { messageId: options.messageId });
+    // The ACK message is what starts Claude (with --resume) on an idle agent. It answers in
+    // seconds, so the wait before the reload stays short; the reload kills the process, and a
+    // queued or running turn would be lost with it. The real prompt is only sent after the
+    // reload restored the history, so it can never be cut short by the reload.
+    await agent.send(BRANCH_ACK_PROMPT, { messageId: options.messageId });
     const resumed = await waitForSessionId(paseo, agent.id);
     if (resumed !== forkId) {
       throw new Error(`agent resumed session ${resumed ?? "(none)"} instead of the fork ${forkId}`);
@@ -297,6 +298,9 @@ async function claudeRootFork(
     }
     await runPaseoCli(["agent", "reload", agent.id, "--json"]);
     if (!(await hasHistory(paseo, agent.id))) throw new Error("reload did not restore the copied history");
+    if (options.prompt) {
+      await agent.send(options.prompt);
+    }
   } catch (error) {
     await agent.archive().catch(() => undefined);
     throw error;
