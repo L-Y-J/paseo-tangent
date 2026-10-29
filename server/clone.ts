@@ -284,12 +284,16 @@ async function claudeRootFork(
     if (parent.thinkingOptionId) {
       await runPaseoCli(["agent", "update", agent.id, "--thinking", parent.thinkingOptionId, "--json"]);
     }
-    // The message is what starts Claude (with --resume) on an idle agent; it is sent before the
-    // reload, so the turn's reply lands after the restored history either way.
+    // The message is what starts Claude (with --resume) on an idle agent. The turn it starts
+    // must finish before the reload: a reload kills the process, and a queued or running turn
+    // is lost with it (the prompt would vanish from the new tab).
     await agent.send(options.prompt ?? BRANCH_ACK_PROMPT, { messageId: options.messageId });
     const resumed = await waitForSessionId(paseo, agent.id);
     if (resumed !== forkId) {
       throw new Error(`agent resumed session ${resumed ?? "(none)"} instead of the fork ${forkId}`);
+    }
+    if (!(await waitForIdle(paseo, agent.id))) {
+      throw new Error("the fork's first turn did not settle before the reload");
     }
     await runPaseoCli(["agent", "reload", agent.id, "--json"]);
     if (!(await hasHistory(paseo, agent.id))) throw new Error("reload did not restore the copied history");
@@ -311,6 +315,20 @@ async function waitForSessionId(paseo: PaseoApi, agentId: string): Promise<strin
     await new Promise((resolve) => setTimeout(resolve, 600));
   }
   return null;
+}
+
+// The turn answering the first prompt must end before the reload, or it is killed mid-flight
+// and its messages never reach the timeline. Give it a generous window: the answer to the
+// fork's opening prompt can legitimately take a while.
+async function waitForIdle(paseo: PaseoApi, agentId: string, timeoutMs = 10 * 60_000): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const refreshed = await paseo.agents.ref(agentId).refresh();
+    const lifecycle = refreshed?.agent?.status;
+    if (lifecycle === "idle" || lifecycle === "error" || lifecycle === "closed") return true;
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+  }
+  return false;
 }
 
 // The plugin SDK cannot import sessions or change thinking and mode, so these go through
